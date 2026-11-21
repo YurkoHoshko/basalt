@@ -43,7 +43,10 @@ the text model.
   drafter's full layer; the window layers' rings do not grow.
 - **Experts in RAM when the context needs the room:** when the asked context does not fit beside every expert, the least
   routed experts (by the shipped profile `data/profiles/inkling2-24x128.prof`) are planned into page-locked RAM, just enough,
-  and decode reads them there over the bus. The full visits' caches then back their first 32,768 positions and grow as prompts
+  and decode reads them there over the bus. On a host link rated at no more than 8 GB/s, with at least two CPU pool workers
+  per session, RAM experts instead use the shared native CPU pool while resident experts run on the card. Only activations
+  and results cross the link for those experts; their weights stay in RAM. Unknown or wider links keep GPU execution.
+  The full visits' caches then back their first 32,768 positions and grow as prompts
   need them, and the experts planned into RAM are copied back to the card while the caches leave room, the least routed
   giving way first when they grow. A short chat at `--max-context 1048576 --kv fp8` keeps every expert on the card. On a
   smaller card the spill is static: what does not fit stays in RAM. Nothing changes when everything fits.
@@ -79,6 +82,8 @@ Not measured. `--parallel N` starts N sessions, each with its own caches and dra
 multiples of 40 pixels, one token per 40 x 40 cell: a 640 x 488 picture takes 208 tokens. A picture of more than 10,609 cells
 (about 4,120 x 4,120) is scaled down to fit (bicubic). Transparent pixels are laid over the reference processor's grey
 checkerboard (8 x 8 squares of 204 and 153), as the model saw in training; the model tends to call such a background black.
+With elastic experts, an image request reclaims temporary expert copies when its encoder needs the space; the weights
+remain in RAM and may be promoted again after the encoder releases its region.
 
 ## Chat, thinking and tools
 
@@ -93,8 +98,8 @@ checkerboard (8 x 8 squares of 204 and 153), as the model saw in training; the m
 
 - One card: no second card and no layer split. Experts read from RAM cost a bus read each, so a spilled card decodes slower
   (an RTX 5060 Ti with about 740 experts in RAM: 53 to 67 tok/s).
-- The server's `decode expert cache hit rate` line reads 100 % on a spilled load; the engine's `experts: ... on the card`
-  line at the end of a session is the real share.
+- The decode expert cache hit rate is the share of routed experts whose weights are on the card; elastic copies count
+  as resident while they remain there.
 - No video.
 
 ## Speed
@@ -111,3 +116,17 @@ checkerboard (8 x 8 squares of 204 and 153), as the model saw in training; the m
 Drafts accepted: conversation 68.0 %, struct 97.5 %, prose 50.7 %. llama.cpp (29b52d398, `-fa 1`, full offload, no drafting)
 ran the same token ids through `llama-server` with the same lengths and temperatures; `llama-bench` tg128 reads 96.3 tok/s.
 The struct fixture runs to its 8,192-token cap on both engines.
+
+### RAM experts on a narrow link
+
+RTX 5060 Ti at 180 W, PCIe 4 x4, Core Ultra 9 285HX with 12 pool workers, 64K FP16 context. `basalt-bench` conversation
+then a 16K prompt, two cold runs each in CPU/GPU/GPU/CPU order, seed 123, drafting capped at four. Both runs keep the
+same 1,612 experts resident with the same profile; no elastic promotion in this comparison.
+
+| RAM expert execution | Conversation tok/s | ms/window | Passes/s | Prompt tok/s |
+| --- | ---: | ---: | ---: | ---: |
+| GPU mapped reads | 11.0 | 157.9 | 6.33 | 1,398 |
+| CPU pool | 64.3 | 30.9 | 32.32 | 1,398 |
+
+The CPU gate/up microbench at the real 2,304 x 1,152 NVFP4 geometry: four rows in 392 microseconds, 108 GFLOP/s.
+Copying the CPU results through mapped RAM: four rows in 47.2 microseconds, 6.25 GB/s. Quality: [RAM tier](../precision/inkling2.md#experts-in-ram).

@@ -257,13 +257,16 @@ add_library(inkling2_kernels STATIC src/models/inkling2/kernels/ops.cu src/model
   src/models/inkling2/kernels/prompt_ops.cu)
 target_include_directories(inkling2_kernels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(inkling2_kernels PUBLIC ${_gpu_runtime_target})
-add_library(model_inkling2 STATIC src/models/inkling2/adapter.cpp src/models/inkling2/pretok_inkling2.cpp
+add_library(model_inkling2 STATIC src/models/inkling2/adapter.cpp src/models/inkling2/pretok_inkling2.cpp src/models/inkling2/cpu_spill.cpp
   src/models/inkling2/pack.cpp src/models/inkling2/model.cpp src/models/inkling2/session.cpp src/models/inkling2/walk.cpp
   src/models/inkling2/prompt.cpp src/models/inkling2/vision.cpp src/models/inkling2/vision_encoder.cpp
   src/models/inkling2/dspark.cpp src/models/inkling2/spill.cpp)
 target_include_directories(model_inkling2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src PRIVATE ${_gpu_include_directories} ${CMAKE_CURRENT_SOURCE_DIR}/src/program/tokenizer)
 target_link_libraries(model_inkling2 PUBLIC model tokenizer inkling2_kernels tiers kernels window_gemm mmq prefill_fp4 core vision_cuda ${_gpu_runtime_target})
 if(BUILD_TESTING)
+  add_executable(inkling2_cpu_softcap_test tests/models/inkling2/cpu_softcap_test.cpp)
+  target_link_libraries(inkling2_cpu_softcap_test PRIVATE kernels_cpu ggml_quants)
+  basalt_cpu_test(NAME inkling2_cpu_softcap_test COMMAND inkling2_cpu_softcap_test)
   add_executable(inkling2_kernels_parity src/models/inkling2/kernels/kernels_parity.cpp)
   target_include_directories(inkling2_kernels_parity PRIVATE ${_gpu_include_directories})
   target_link_libraries(inkling2_kernels_parity PRIVATE inkling2_kernels kernels ggml_quants ${_gpu_runtime_target})
